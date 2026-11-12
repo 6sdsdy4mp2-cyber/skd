@@ -1,0 +1,104 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userRole(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data.role;
+    }
+
+    function isEmployee() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userRole(request.auth.uid) in ['employee1', 'employee2'];
+    }
+
+    function isTaskParticipant(data) {
+      return data.createdBy == request.auth.uid
+        || data.assignedTo == request.auth.uid;
+    }
+
+    function taskData(taskId) {
+      return get(/databases/$(database)/documents/tasks/$(taskId)).data;
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /tasks/{taskId} {
+      allow read: if isEmployee() && isTaskParticipant(resource.data);
+
+      allow create: if isEmployee()
+        && userRole(request.auth.uid) == 'employee1'
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status == 'waiting'
+        && request.resource.data.assignedTo is string
+        && userRole(request.resource.data.assignedTo) == 'employee2'
+        && request.resource.data.keys().hasOnly([
+          'title', 'note', 'createdBy', 'assignedTo', 'status',
+          'originalFile', 'processedFile', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.originalFile == null
+        && request.resource.data.processedFile == null;
+
+      allow update: if isEmployee()
+        && userRole(request.auth.uid) == 'employee1'
+        && resource.data.createdBy == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['originalFile', 'updatedAt'])
+        && request.resource.data.originalFile is map;
+
+      allow update: if isEmployee()
+        && userRole(request.auth.uid) == 'employee2'
+        && resource.data.assignedTo == request.auth.uid
+        && (
+          (
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'updatedAt'])
+            && request.resource.data.status == 'processing'
+          )
+          ||
+          (
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'processedFile', 'updatedAt'])
+            && request.resource.data.status == 'completed'
+            && request.resource.data.processedFile is map
+          )
+        );
+
+      allow delete: if false;
+
+      // Images are compressed in the browser and split into small Firestore docs.
+      // Only the task's two assigned employees can read the chunks.
+      match /files/{kind}/uploads/{fileId}/chunks/{chunkId} {
+        allow read: if isEmployee() && isTaskParticipant(taskData(taskId));
+
+        allow create: if isEmployee()
+          && request.resource.data.keys().hasOnly(['index', 'data', 'createdAt'])
+          && request.resource.data.index is int
+          && request.resource.data.index >= 0
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 650000
+          && (
+            (
+              kind == 'original'
+              && userRole(request.auth.uid) == 'employee1'
+              && taskData(taskId).createdBy == request.auth.uid
+            )
+            ||
+            (
+              kind == 'processed'
+              && userRole(request.auth.uid) == 'employee2'
+              && taskData(taskId).assignedTo == request.auth.uid
+            )
+          );
+
+        allow update, delete: if false;
+      }
+    }
+  }
+}

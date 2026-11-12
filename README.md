@@ -1,107 +1,61 @@
-# PhotoFlow Cloud（兩位員工雲端照片交接系統）
+# PhotoFlow Cloud（免費方案照片交接版）
 
-這是一個真正連接 Firebase 的雲端 Web App。員工一上傳原圖建立工作，員工二在另一部電腦登入後即時看到工作，下載原圖並上傳成品；員工一會即時看到「已交回」狀態並下載成品。
+兩位員工使用各自的 Firebase Email/Password 帳戶，在不同電腦即時交接照片。
 
-## 功能
-- Firebase Email/Password 登入（不提供公開註冊）
-- 兩個角色：`employee1`、`employee2`
-- Firestore 即時工作同步
-- Firebase Storage 雲端照片儲存
-- 原圖 / 成品分開儲存
-- Firestore 與 Storage Security Rules
-- 單張圖片限制 25MB，支援 JPG、PNG、WEBP
+## 本版本的儲存方式
+- Firebase Authentication：員工登入。
+- Cloud Firestore：工作資料及照片分段資料。
+- 不使用 Firebase Storage，因此不需要為 Storage 升級 Blaze 或連結帳單帳戶。
+- 瀏覽器會將圖片縮放至最長邊 2000px，轉成 WebP（不支援時使用 JPEG），壓縮後最多 8MB，再切成每段 450KiB 的資料寫入 Firestore。
+- 原始檔選擇上限 25MB；超過壓縮上限會提示使用者選擇較小照片。
 
-## 重要：部署前需要你自己的 Firebase 專案
-本專案不包含任何真實 Firebase 金鑰、帳戶或雲端儲存空間。必須由你建立 Firebase 專案並填入自己的設定，才會成為可用的雲端系統。
+## 重要限制
+這是小型、低流量的兩人工作流程方案，不是大型相片庫。Firestore 每份文件上限為 1MiB，故照片必須壓縮及分段。照片讀取及寫入仍會消耗 Firestore 免費額度；免費額度不是無限，請留意 Firebase Console 的用量頁面。若大量傳送高解析照片或頻繁下載，可能超出免費額度或儲存空間。
 
-## A. 建立 Firebase 專案
-1. 前往 https://console.firebase.google.com/，使用 Google 帳戶登入。
-2. 建立專案，例如 `photoflow-team`。
-3. 在專案總覽按「新增應用程式」並選 Web（</>）。
-4. 登記應用程式名稱 `PhotoFlow`，取得 Firebase Web App config。
-5. 將設定填入 `public/firebase-config.js`，不要保留 `YOUR_...` 佔位文字。
-6. Firebase Console -> Authentication -> Get started -> Sign-in method，啟用 **Email/Password**。
-7. Authentication -> Users -> Add user，建立兩個員工帳戶。不要開放公開註冊。
-8. 在 Authentication 使用者清單複製兩個 UID。
+## Firebase 已設定資料
+`public/firebase-config.js` 已填入你提供的 Web App 設定，員工二 UID 亦已填入。請不要把 Firebase Admin SDK 私密金鑰放進前端。
 
-## B. 建立員工角色資料
-Firebase Console -> Firestore Database -> Create database（建議選 production mode，位置選接近團隊的區域）。
+## 部署前確認
+1. Firebase Authentication 已啟用 Email/Password，並已建立兩位員工帳戶。
+2. Firestore `users` 集合中：
+   - 文件 ID `fO4VF5P12kQKdlH9fg3TtgLuid42`，欄位 `role` = `employee1`
+   - 文件 ID `1aGRoTUJpyVLYTt3RXO6Ogup7NU2`，欄位 `role` = `employee2`
+3. Firestore 資料庫已建立。
+4. 不需要建立 Firebase Storage。
 
-建立 `users` collection，建立以下兩份文件。文件 ID 必須是該員工的 Authentication UID：
+## 部署 Firestore 規則及網站
+需要安裝 Node.js LTS：https://nodejs.org/
 
-文件一（ID = 員工一 UID）：
-```json
-{
-  "displayName": "員工一",
-  "role": "employee1"
-}
-```
+在專案資料夾開啟終端機，執行：
 
-文件二（ID = 員工二 UID）：
-```json
-{
-  "displayName": "員工二",
-  "role": "employee2"
-}
-```
-
-在 `public/firebase-config.js` 將 `employee2Uid` 設為員工二的 Authentication UID。這讓員工一建立工作時，系統知道要分配給哪位員工。
-
-## C. 啟用 Firebase Storage
-Firebase Console -> Storage -> Get started，建立儲存空間。建議選擇與 Firestore 相同或接近的區域。
-本專案的 `storage.rules` 會限制只有兩個已登記角色的登入員工，才可存取自己參與的工作照片。
-
-## D. 安裝 Firebase CLI 並部署
-需要安裝 Node.js LTS。下載：https://nodejs.org/
-
-在專案資料夾開啟終端機：
 ```bash
 npm install -g firebase-tools
 firebase login
+firebase deploy --only firestore:rules,hosting
 ```
 
-將 `.firebaserc.example` 複製成 `.firebaserc`，並把 `YOUR_FIREBASE_PROJECT_ID` 改成你的 Firebase Project ID。
+專案已設定 Firebase Project ID：`photoflow-7bdaf`。若 Firebase CLI 詢問專案，選擇這個專案。
 
-在專案根目錄執行：
-```bash
-firebase use YOUR_FIREBASE_PROJECT_ID
-firebase deploy --only firestore:rules,storage
-firebase deploy --only hosting
-```
+部署完成後，CLI 會顯示 Hosting 網址，通常是：
+`https://photoflow-7bdaf.web.app`
 
-部署完成後，Firebase CLI 會顯示 Hosting 網址，通常形如：
-`https://YOUR_PROJECT_ID.web.app`
-
-將同一網址交給員工一和員工二。兩人使用各自帳戶，在不同電腦登入即可。
-
-## E. 本機測試（可選）
-```bash
-firebase emulators:start
-```
-注意：若使用 Emulator，需另行設定前端連接 Emulator；目前預設前端連接正式 Firebase 專案。
-
-## 操作流程
+## 使用流程
 ### 員工一
 1. 登入。
-2. 填寫工作名稱、修圖要求。
-3. 選擇一張原始照片。
-4. 按「上傳原圖並傳送工作」。
-5. 等待工作狀態變成「已交回」。
-6. 按「下載完成照片」。
+2. 填寫工作名稱及修圖要求。
+3. 選擇原始照片並按「上傳原圖並傳送工作」。
+4. 等待員工二交回成品。
+5. 按「下載完成照片」。
 
 ### 員工二
 1. 登入。
-2. 新工作會即時出現在工作清單。
-3. 按「下載原始照片」。
-4. 在自己的修圖軟件完成修整。
-5. 按「上傳完成照片」，選擇成品。
-6. 上傳完成後，工作狀態會變成「已交回」。
+2. 在工作清單查看新工作。
+3. 下載原始照片。
+4. 使用修圖軟件完成修整。
+5. 按「上傳完成照片」交回成品。
 
-## 安全及營運提醒
-- 這個版本只支援每個工作上傳一張原圖及一張完成照片。
-- 目前沒有管理員介面；帳戶及角色由 Firebase Console 管理。
-- 不要將 Firebase Admin SDK 私密金鑰放進前端。
-- Firebase Web API key 會出現在瀏覽器是正常設計；真正的存取保護由 Authentication、Firestore Rules 和 Storage Rules 執行。
-- 請在 Firebase Console 設定預算提醒。Firebase 服務的免費額度及收費會因方案、地區和使用量而異；不要假設永遠免費。
-- 上線前請用兩個真實帳戶、兩部不同電腦完整測試：登入、上傳原圖、員工二讀取、交回成品、員工一下載，以及未登入時不能讀取。
-- 建議使用 HTTPS（Firebase Hosting 預設提供）。
+## 安全及測試
+- `firestore.rules` 限制只有工作建立者及被指派的員工讀取工作及照片分段；員工一只能建立原圖分段，員工二只能建立成品分段。
+- 員工角色必須由管理員在 Firebase Console 手動設定；前端不能自行改角色。
+- 上線前請用兩個真實帳戶及兩部電腦測試：登入、上傳原圖、員工二下載、交回成品、員工一下載，以及未登入時不能讀取。
+- 若 Firestore 顯示 `permission-denied`，先確認兩筆 `users` 文件 ID 和 role 完全正確，並確認已部署新版 `firestore.rules`。
