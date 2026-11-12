@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function userRole(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data.role;
+    }
+    function isEmployee() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userRole(request.auth.uid) in ['employee1', 'employee2'];
+    }
+    function isTaskParticipant(data) {
+      return data.createdBy == request.auth.uid
+        || data.assignedTo == request.auth.uid;
+    }
+
+    match /users/{uid} {
+      // Each employee can read only their own profile.
+      allow read: if signedIn() && request.auth.uid == uid;
+      // Profiles and roles must be provisioned manually in Firebase Console.
+      allow write: if false;
+    }
+
+    match /tasks/{taskId} {
+      allow read: if isEmployee() && isTaskParticipant(resource.data);
+
+      // Employee 1 creates a task assigned to an account whose profile is employee2.
+      allow create: if isEmployee()
+        && userRole(request.auth.uid) == 'employee1'
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status == 'waiting'
+        && request.resource.data.assignedTo is string
+        && userRole(request.resource.data.assignedTo) == 'employee2'
+        && request.resource.data.keys().hasOnly([
+          'title', 'note', 'createdBy', 'assignedTo', 'status',
+          'originalFile', 'processedFile', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.originalFile == null
+        && request.resource.data.processedFile == null;
+
+      // Employee 1 may attach the original image metadata to their own task.
+      allow update: if isEmployee()
+        && userRole(request.auth.uid) == 'employee1'
+        && resource.data.createdBy == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['originalFile', 'updatedAt'])
+        && request.resource.data.originalFile is map;
+
+      // Employee 2 may mark a task as processing, or return a finished image.
+      allow update: if isEmployee()
+        && userRole(request.auth.uid) == 'employee2'
+        && resource.data.assignedTo == request.auth.uid
+        && (
+          (
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'updatedAt'])
+            && request.resource.data.status == 'processing'
+          )
+          ||
+          (
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'processedFile', 'updatedAt'])
+            && request.resource.data.status == 'completed'
+            && request.resource.data.processedFile is map
+          )
+        );
+
+      allow delete: if false;
+    }
+  }
+}
