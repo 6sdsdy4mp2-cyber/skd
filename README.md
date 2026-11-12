@@ -59,3 +59,13 @@ firebase deploy --only firestore:rules,hosting
 - 員工角色必須由管理員在 Firebase Console 手動設定；前端不能自行改角色。
 - 上線前請用兩個真實帳戶及兩部電腦測試：登入、上傳原圖、員工二下載、交回成品、員工一下載，以及未登入時不能讀取。
 - 若 Firestore 顯示 `permission-denied`，先確認兩筆 `users` 文件 ID 和 role 完全正確，並確認已部署新版 `firestore.rules`。
+
+## 工作內附件及交接內容（新增）
+- 每個新照片工作可一次選擇或拖放最多 20 張 JPG、PNG、WEBP 原圖。
+- 每張照片會在瀏覽器縮小至最長邊 2000px，並壓縮至 8MB 內，再分段存入 Firestore。
+- 每個工作可另外上傳一般附件；每個附件目前限制 8MB，與照片數量分開計算。
+- 每個工作可儲存交接文字（最多 4,000 字元）及 HTTP/HTTPS 網址（最多 2,000 字元）。
+- 以上內容只允許該工作建立者及被指派員工讀取。
+- 部署時請使用本專案根目錄的 `firestore.rules`，並重新發布 Firestore Rules。
+
+注意：Firestore 每份文件有 1 MiB 上限，且免費方案有每日讀寫／儲存配額。分段儲存並不代表無限容量或不限流量；多張高解析度照片及大量附件仍可能耗盡免費配額。既有工作仍可讀取原本的 `originalFile` 欄位；多張照片欄位 `originalFiles` 用於新建立的工作。
